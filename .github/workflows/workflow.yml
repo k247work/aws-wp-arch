@@ -1,0 +1,24 @@
+name: deploy-code-to-s3
+on:
+  pull_request:
+    branches:
+      - master
+    types: [opened, synchronize, closed] #他のjobがある想定でこの設定にしている
+
+jobs:
+  SyncResources:
+    name: Upload files
+    if: github.event.pull_request.merged == true #マージされたときのみこのjobを実行する
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: "Configure AWS credentials"
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-northeast-1
+      - name: S3 sync
+        run: aws s3 sync . s3://k247work-github/aws-wp-arch/ --delete --grants read=uri=http://acs.amazonaws.com/groups/global/AllUsers --exclude "images/*"
+
