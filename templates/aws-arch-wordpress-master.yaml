@@ -1,0 +1,4 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: Stack to deploy a WordPress environment based on https://github.com/aws-samples/aws-refarch-wordpress.
