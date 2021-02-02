@@ -1,11 +1,12 @@
 ---
 AWSTemplateFormatVersion: 2010-09-09
 
-Description: Stack to deploy a WordPress environment based on https://github.com/aws-samples/aws-refarch-wordpress.
+Description: Stack to deploy a highly available, elastic, scalable WordPress environment. This master stack launches multiple nested stacks for different tiers.
 
-MetaData:
+Metadata:
+
   Authors:
-    Description: Darryl Osborne (darrylo@amazon.com)  modified by K247work.
+    Description: Darryl Osborne (darrylo@amazon.com)
   License:
     Description: 'Copyright 2018 Amazon.com, Inc. and its affiliates. All Rights Reserved.
                   SPDX-License-Identifier: MIT-0'
@@ -25,34 +26,20 @@ MetaData:
     - Label:
         default: Network
       Parameters:
-        - NumberOfAZs
-        - AvailabilityZones
-        - VpcCidr
-        - VpcTenancy
-        - PublicSubnet0Cidr
-        - PublicSubnet1Cidr
-        - PublicSubnet2Cidr
-        - PublicSubnet3Cidr
-        - PublicSubnet4Cidr
-        - PublicSubnet5Cidr
-        - WebSubnet0Cidr
-        - WebSubnet1Cidr
-        - WebSubnet2Cidr
-        - WebSubnet3Cidr
-        - WebSubnet4Cidr
-        - WebSubnet5Cidr
-        - DataSubnet0Cidr
-        - DataSubnet1Cidr
-        - DataSubnet2Cidr
-        - DataSubnet3Cidr
-        - DataSubnet4Cidr
-        - DataSubnet5Cidr
+        - VpcId
+        - NumberOfPublicSubnets
+        - PublicSubnet
+        - NumberOfWebSubnets
+        - WebSubnet
+        - NumberOfDataSubnets
+        - DataSubnet
     - Label:
         default: File System Tier
       Parameters:
         - EfsPerformanceMode
         - EfsEncrpytedBoolean
         - EfsCmk
+        - EfsCopyDataFrom
         - EfsGrowth
         - EfsGrowthInstanceType
         - EfsCreateAlarms
@@ -67,6 +54,7 @@ MetaData:
         - DatabaseCmk
         - DatabaseMasterUsername
         - DatabaseMasterPassword
+        - DatabaseRestoreSnapshot
         - DatabaseName
         - UseElastiCacheBoolean
         - ElastiCacheNodeType
@@ -93,10 +81,14 @@ MetaData:
         - WPDirectory
         - WPLocale
     ParameterLabels:
+      AdminEmail:
+        default: Email Address
       BastionInstanceType:
         default: Bastion Instance Type
       CloudFrontAcmCertificate:
         default: CloudFront Certificate ARN
+      DataSubnet:
+        default: Data subnets
       DatabaseCmk:
         default: AWS KMS CMK for RDS 
       DatabaseEncrpytedBoolean:
@@ -109,6 +101,9 @@ MetaData:
         default: DB Master Password
       DatabaseName:
         default: DB Name
+      DatabaseRestoreSnapshot:
+        Description: The snapshot name to restore from.
+        Type: String
       EfsAlarmsInstanceType:
         default: Instance Type
       EfsCmk:
@@ -119,6 +114,9 @@ MetaData:
         default: Encrpyted EFS?
       EfsGrowth:
         default: Add dummy data (GiB)
+      EfsCopyDataFrom:
+        Description: Clone EFS files from existing EFS (Enter existing EFS file system ID)
+        Type: String
       EfsGrowthInstanceType:
         default: Instance Type
       EfsCriticalThreshold:
@@ -131,10 +129,20 @@ MetaData:
         default: Cache Cluster Node Type
       EC2KeyName:
         default: EC2 Key Pair
+      NumberOfPublicSubnets:
+        default: Number of Public Subnets
+      NumberOfDataSubnets:
+        default: Number of Data Subnets
+      NumberOfWebSubnets:
+        default: Number of Web Subnets
       PHPIniOverride:
         default: AWS php.ini Overrides
+      PHPVersion:
+        default: PHP Version
       PublicAlbAcmCertificate:
         default: ALB Certificate ARN
+      PublicSubnet:
+        default: Public subnets
       SshAccessCidr:
         default: SSH Access From
       UseElastiCacheBoolean:
@@ -143,20 +151,22 @@ MetaData:
         default: CDN (CloudFront)
       UseRoute53Boolean:
         default: DNS record set (Route53)
+      VpcId:
+        default: VpcId
       WebAsgMax:
         default: Web ASG Max
       WebAsgMin:
         default: Web ASG Min
       WebInstanceType:
         default: Web Tier Instance Type
+      WebSubnet:
+        default: Web subnets
       WPTitle:
         default: Site Title
       WPAdminUsername:
         default: Admin Username
       WPAdminPassword:
         default: Admin Password
-      AdminEmail:
-        default: Email Address
       WPDirectory:
         default: Site Directory
       WPDomainName:
@@ -165,55 +175,13 @@ MetaData:
         default: Language Code
       WPVersion:
         default: WordPress Version
-      AvailabilityZones:
-        default: Availability Zones
-      NumberOfAZs:
-        default: Number of Availability Zones
-      VpcCidr:
-        default: VpcCidr
-      VpcTenancy:
-        default: VpcTenancy
-      PHPVersion:
-        default: PHP Version
-      PublicSubnet0Cidr:
-        default: Public Subnet 0
-      PublicSubnet1Cidr:
-        default: Public Subnet 1
-      PublicSubnet2Cidr:
-        default: Public Subnet 2
-      PublicSubnet3Cidr:
-        default: Public Subnet 3
-      PublicSubnet4Cidr:
-        default: Public Subnet 4
-      PublicSubnet5Cidr:
-        default: Public Subnet 5
-      WebSubnet0Cidr:
-        default: Web Subnet 0
-      WebSubnet1Cidr:
-        default: Web Subnet 1
-      WebSubnet2Cidr:
-        default: Web Subnet 2
-      WebSubnet3Cidr:
-        default: Web Subnet 3
-      WebSubnet4Cidr:
-        default: Web Subnet 4
-      WebSubnet5Cidr:
-        default: Web Subnet 5
-      DataSubnet0Cidr:
-        default: Data Subnet 0
-      DataSubnet1Cidr:
-        default: Data Subnet 1
-      DataSubnet2Cidr:
-        default: Data Subnet 2
-      DataSubnet3Cidr:
-        default: Data Subnet 3
-      DataSubnet4Cidr:
-        default: Data Subnet 4
-      DataSubnet5Cidr:
-        default: Data Subnet 5
 
 Parameters:
 
+  AdminEmail:
+    AllowedPattern: ^(([^<>()\[\]\\.,;:\s@"]+(\.[^<>()\[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$
+    Description: The admin email address for WordPress and AWS notifications.
+    Type: String
   BastionInstanceType:
     AllowedValues:
     - t2.nano 
@@ -316,6 +284,9 @@ Parameters:
   DatabaseCmk:
     Description: AWS KMS Customer Master Key (CMK) to encrypt database cluster
     Type: String
+  DataSubnet:
+    Description: Select existing data subnet ids. The number selected must match the number of subnets above.
+    Type: List<AWS::EC2::Subnet::Id>
   DatabaseEncrpytedBoolean:
     AllowedValues:
       - true
@@ -623,8 +594,38 @@ Parameters:
     ConstraintDescription: Must be letters (upper or lower), numbers, and special characters.
     Description: Name of an EC2 KeyPair. Your bastion & Web instances will launch with this KeyPair.
     Type: AWS::EC2::KeyPair::KeyName
+  NumberOfDataSubnets:
+    AllowedValues:
+    - 2
+    - 3
+    - 4
+    - 5
+    - 6
+    Default: 3
+    Description: Number of data subnets in the VPC.
+    Type: Number
+  NumberOfPublicSubnets:
+    AllowedValues:
+    - 2
+    - 3
+    - 4
+    - 5
+    - 6
+    Default: 3
+    Description: Number of public subnets in the VPC.
+    Type: Number
+  NumberOfWebSubnets:
+    AllowedValues:
+    - 2
+    - 3
+    - 4
+    - 5
+    - 6
+    Default: 3
+    Description: Number of web subnets in the VPC.
+    Type: Number
   PHPIniOverride:
-    Description: Full Amazon S3 https path to a php.ini override file (e.g. http://k247work-github.s3.amazonaws.com/aws-wp-arch/samples/20-aws.ini)
+    Description: Full Amazon S3 https path to a php.ini override file (e.g. https://s3.amazonaws.com/aws-refarch/wordpress/latest/bits/20-aws.ini)
     Type: String
   PHPVersion:
     AllowedValues:
@@ -638,6 +639,9 @@ Parameters:
     AllowedPattern: ^$|(arn:aws:acm:)([a-z0-9/:-])*([a-z0-9])$
     Description: '[ Optional ] The AWS Certification Manager certificate ARN for the ALB certificate - this certificate should be created in the region you wish to run the ALB and must reference the WordPress domain name you use below.'
     Type: String
+  PublicSubnet:
+    Description: Select existing public subnet ids. The number selected must match the number of subnets above.
+    Type: List<AWS::EC2::Subnet::Id>
   SshAccessCidr:
     AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
     Description: The CIDR IP range that is permitted to SSH to bastion instance. Note - a value of 0.0.0.0/0 will allow access from ANY IP address.
@@ -661,9 +665,12 @@ Parameters:
     AllowedValues:
       - true
       - false
-    Default: true
-    Description: Specifies whether a record set should be created in Route 53 for your WordPress domain name.
+    Default: false
+    Description: Specifies whether a record set should be created in Route 53 for your WordPress domain name. Requires custom domain name above.
     Type: String
+  VpcId:
+    Description: The VPC Id
+    Type: AWS::EC2::VPC::Id
   WebAsgMax:
     AllowedPattern: ^((?!0$)[1-2]?[0-9]|30)$
     ConstraintDescription: Must be a number between 1 and 30.
@@ -771,10 +778,6 @@ Parameters:
     Default: t2.large
     Description: The Amazon EC2 instance type for your web instances.
     Type: String
-  AdminEmail:
-    AllowedPattern: ^(([^<>()\[\]\\.,;:\s@"]+(\.[^<>()\[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$
-    Description: The admin email address for WordPress and AWS notifications.
-    Type: String
   WPAdminPassword:
     AllowedPattern: ^([a-zA-Z0-9`~!#$%^&*()_+,\\-])*$
     ConstraintDescription: Must be letters (upper or lower), numbers, spaces, and these special characters `~!#$%^&*()_+,-    
@@ -802,142 +805,9 @@ Parameters:
     AllowedPattern: ^([a-zA-Z0-9])([a-zA-Z0-9 _-]*)([a-zA-Z0-9])$
     Description: The WordPress website title.
     Type: String
-  AvailabilityZones:
-    Description: 'List of Availability Zones to use for the subnets in the VPC. Note:
-      The logical order is preserved.'
-    Type: List<AWS::EC2::AvailabilityZone::Name>
-  NumberOfAZs:
-    AllowedValues:
-    - 2
-    - 3
-    - 4
-    - 5
-    - 6
-    Default: 3
-    Description: Number of Availability Zones to use in the VPC. This must match your
-      selections in the list of Availability Zones parameter.
-    Type: Number
-  VpcCidr:
-    AllowedPattern: "^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\\/(1[6-9]|2[0-8]))$"
-    ConstraintDescription: CIDR block parameter must be in the form x.x.x.x/16-28
-    Default: 10.0.0.0/16
-    Description: CIDR block for the VPC
-    Type: String
-  VpcTenancy:
-    AllowedValues:
-    - default
-    - dedicated
-    Default: default
-    Description: The allowed tenancy of instances launched into the VPC
-    Type: String
-  DataSubnet0Cidr:
-    AllowedPattern: "^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\\/(1[6-9]|2[0-8]))$"
-    ConstraintDescription: CIDR block parameter must be in the form x.x.x.x/16-28
-    Default: 10.0.100.0/24
-    Description: CIDR block for data subnet 0 located in Availability Zone 0
-    Type: String
-  DataSubnet1Cidr:
-    AllowedPattern: "^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\\/(1[6-9]|2[0-8]))$"
-    ConstraintDescription: CIDR block parameter must be in the form x.x.x.x/16-28
-    Default: 10.0.101.0/24
-    Description: CIDR block for data subnet 1 located in Availability Zone 1
-    Type: String
-  DataSubnet2Cidr:
-    AllowedPattern: "^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\\/(1[6-9]|2[0-8]))$"
-    ConstraintDescription: CIDR block parameter must be in the form x.x.x.x/16-28
-    Default: 10.0.102.0/24
-    Description: CIDR block for data subnet 2 located in Availability Zone 2
-    Type: String
-  DataSubnet3Cidr:
-    AllowedPattern: "^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\\/(1[6-9]|2[0-8]))$"
-    ConstraintDescription: CIDR block parameter must be in the form x.x.x.x/16-28
-    Default: 10.0.103.0/24
-    Description: CIDR block for data subnet 3 located in Availability Zone 3
-    Type: String
-  DataSubnet4Cidr:
-    AllowedPattern: "^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\\/(1[6-9]|2[0-8]))$"
-    ConstraintDescription: CIDR block parameter must be in the form x.x.x.x/16-28
-    Default: 10.0.104.0/24
-    Description: CIDR block for data subnet 4 located in Availability Zone 4
-    Type: String
-  DataSubnet5Cidr:
-    AllowedPattern: "^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\\/(1[6-9]|2[0-8]))$"
-    ConstraintDescription: CIDR block parameter must be in the form x.x.x.x/16-28
-    Default: 10.0.105.0/24
-    Description: CIDR block for data subnet 5 located in Availability Zone 5
-    Type: String
-  PublicSubnet0Cidr:
-    AllowedPattern: "^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\\/(1[6-9]|2[0-8]))$"
-    ConstraintDescription: CIDR block parameter must be in the form x.x.x.x/16-28
-    Default: 10.0.200.0/24
-    Description: CIDR block for Public subnet 0 located in Availability Zone 0
-    Type: String
-  PublicSubnet1Cidr:
-    AllowedPattern: "^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\\/(1[6-9]|2[0-8]))$"
-    ConstraintDescription: CIDR block parameter must be in the form x.x.x.x/16-28
-    Default: 10.0.201.0/24
-    Description: CIDR block for Public subnet 1 located in Availability Zone 1
-    Type: String
-  PublicSubnet2Cidr:
-    AllowedPattern: "^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\\/(1[6-9]|2[0-8]))$"
-    ConstraintDescription: CIDR block parameter must be in the form x.x.x.x/16-28
-    Default: 10.0.202.0/24
-    Description: CIDR block for Public subnet 2 located in Availability Zone 2
-    Type: String
-  PublicSubnet3Cidr:
-    AllowedPattern: "^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\\/(1[6-9]|2[0-8]))$"
-    ConstraintDescription: CIDR block parameter must be in the form x.x.x.x/16-28
-    Default: 10.0.203.0/24
-    Description: CIDR block for Public subnet 3 located in Availability Zone 3
-    Type: String
-  PublicSubnet4Cidr:
-    AllowedPattern: "^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\\/(1[6-9]|2[0-8]))$"
-    ConstraintDescription: CIDR block parameter must be in the form x.x.x.x/16-28
-    Default: 10.0.204.0/24
-    Description: CIDR block for Public subnet 4 located in Availability Zone 4
-    Type: String
-  PublicSubnet5Cidr:
-    AllowedPattern: "^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\\/(1[6-9]|2[0-8]))$"
-    ConstraintDescription: CIDR block parameter must be in the form x.x.x.x/16-28
-    Default: 10.0.205.0/24
-    Description: CIDR block for Public subnet 5 located in Availability Zone 5
-    Type: String
-  WebSubnet0Cidr:
-    AllowedPattern: "^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\\/(1[6-9]|2[0-8]))$"
-    ConstraintDescription: CIDR block parameter must be in the form x.x.x.x/16-28
-    Default: 10.0.0.0/22
-    Description: CIDR block for Web subnet 0 located in Availability Zone 0
-    Type: String
-  WebSubnet1Cidr:
-    AllowedPattern: "^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\\/(1[6-9]|2[0-8]))$"
-    ConstraintDescription: CIDR block parameter must be in the form x.x.x.x/16-28
-    Default: 10.0.4.0/22
-    Description: CIDR block for Web subnet 1 located in Availability Zone 1
-    Type: String
-  WebSubnet2Cidr:
-    AllowedPattern: "^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\\/(1[6-9]|2[0-8]))$"
-    ConstraintDescription: CIDR block parameter must be in the form x.x.x.x/16-28
-    Default: 10.0.8.0/22
-    Description: CIDR block for Web subnet 2 located in Availability Zone 2
-    Type: String
-  WebSubnet3Cidr:
-    AllowedPattern: "^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\\/(1[6-9]|2[0-8]))$"
-    ConstraintDescription: CIDR block parameter must be in the form x.x.x.x/16-28
-    Default: 10.0.12.0/22
-    Description: CIDR block for Web subnet 3 located in Availability Zone 3
-    Type: String
-  WebSubnet4Cidr:
-    AllowedPattern: "^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\\/(1[6-9]|2[0-8]))$"
-    ConstraintDescription: CIDR block parameter must be in the form x.x.x.x/16-28
-    Default: 10.0.16.0/22
-    Description: CIDR block for Web subnet 4 located in Availability Zone 4
-    Type: String
-  WebSubnet5Cidr:
-    AllowedPattern: "^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\\/(1[6-9]|2[0-8]))$"
-    ConstraintDescription: CIDR block parameter must be in the form x.x.x.x/16-28
-    Default: 10.0.20.0/22
-    Description: CIDR block for Web subnet 5 located in Availability Zone 5
-    Type: String
+  WebSubnet:
+    Description: Select existing web subnet ids. The number selected must match the number of subnets above.
+    Type: List<AWS::EC2::Subnet::Id>
   WPVersion:
     AllowedValues:
       - latest
@@ -955,14 +825,13 @@ Conditions:
 
   AvailableAWSRegion:
     !Or [
-      !Equals [ !Ref 'AWS::Region', ap-northeast-1 ],
       !Equals [ !Ref 'AWS::Region', ap-southeast-2 ],
       !Equals [ !Ref 'AWS::Region', eu-central-1 ],
       !Equals [ !Ref 'AWS::Region', eu-west-1 ],
       !Equals [ !Ref 'AWS::Region', us-east-1 ],
       !Equals [ !Ref 'AWS::Region', us-east-2 ],
       !Equals [ !Ref 'AWS::Region', us-west-2 ]
-    ] # add ap-northeast-1 by k247
+    ]
   EfsCreateAlarms:
     !Equals [ true, !Ref EfsCreateAlarms ]
   EfsCreateNoAlarms:
@@ -976,12 +845,42 @@ Conditions:
   DeployElastiCache: !And
     - !Equals [ true, !Ref UseElastiCacheBoolean ]
     - !Condition AvailableAWSRegion
+  NumberOfPublicSubnets1:
+      !Equals [ 1, !Ref NumberOfPublicSubnets ]
+  NumberOfPublicSubnets2:
+      !Equals [ 2, !Ref NumberOfPublicSubnets ]
+  NumberOfPublicSubnets3:
+      !Equals [ 3, !Ref NumberOfPublicSubnets ]
+  NumberOfPublicSubnets4:
+      !Equals [ 4, !Ref NumberOfPublicSubnets ]
+  NumberOfPublicSubnets5:
+      !Equals [ 5, !Ref NumberOfPublicSubnets ]
+  NumberOfDataSubnets1:
+      !Equals [ 1, !Ref NumberOfDataSubnets ]
+  NumberOfDataSubnets2:
+      !Equals [ 2, !Ref NumberOfDataSubnets ]
+  NumberOfDataSubnets3:
+      !Equals [ 3, !Ref NumberOfDataSubnets ]
+  NumberOfDataSubnets4:
+      !Equals [ 4, !Ref NumberOfDataSubnets ]
+  NumberOfDataSubnets5:
+      !Equals [ 5, !Ref NumberOfDataSubnets ]
+  NumberOfWebSubnets1:
+      !Equals [ 1, !Ref NumberOfWebSubnets ]
+  NumberOfWebSubnets2:
+      !Equals [ 2, !Ref NumberOfWebSubnets ]
+  NumberOfWebSubnets3:
+      !Equals [ 3, !Ref NumberOfWebSubnets ]
+  NumberOfWebSubnets4:
+      !Equals [ 4, !Ref NumberOfWebSubnets ]
+  NumberOfWebSubnets5:
+      !Equals [ 5, !Ref NumberOfWebSubnets ]
 
 Resources:
 
   bastion:
     Condition: AvailableAWSRegion
-    DependsOn: [ newvpc, securitygroups ]
+    DependsOn: [ securitygroups ]
     Type: AWS::CloudFormation::Stack
     Properties:
       Parameters:
@@ -992,10 +891,30 @@ Resources:
         EC2KeyName:
           !Ref EC2KeyName
         NumberOfSubnets:
-          !Ref NumberOfAZs
+          !Ref NumberOfPublicSubnets
         Subnet:
-          !GetAtt [ newvpc, Outputs.PublicSubnet ]
-      TemplateURL: http://k247work-github.s3.amazonaws.com/aws-wp-arch/templates/aws-refarch-wordpress-03-bastion.yaml
+          !If
+            [ NumberOfPublicSubnets1,
+            !Select [ 0, !Ref PublicSubnet ],
+            !If
+              [ NumberOfPublicSubnets2,
+              !Join [ ',', [ !Select [ 0, !Ref PublicSubnet ], !Select [ 1, !Ref PublicSubnet ] ] ],
+              !If
+                [ NumberOfPublicSubnets3,
+                !Join [ ',', [ !Select [ 0, !Ref PublicSubnet ], !Select [ 1, !Ref PublicSubnet ], !Select [ 2, !Ref PublicSubnet ] ] ],
+                !If
+                  [ NumberOfPublicSubnets4,
+                  !Join [ ',', [ !Select [ 0, !Ref PublicSubnet ], !Select [ 1, !Ref PublicSubnet ], !Select [ 2, !Ref PublicSubnet ], !Select [ 3, !Ref PublicSubnet ] ] ],
+                  !If
+                    [ NumberOfPublicSubnets5,
+                    !Join [ ',', [ !Select [ 0, !Ref PublicSubnet ], !Select [ 1, !Ref PublicSubnet ], !Select [ 2, !Ref PublicSubnet ], !Select [ 3, !Ref PublicSubnet ], !Select [ 4, !Ref PublicSubnet ] ] ],
+                    !Join [ ',', [ !Select [ 0, !Ref PublicSubnet ], !Select [ 1, !Ref PublicSubnet ], !Select [ 2, !Ref PublicSubnet ], !Select [ 3, !Ref PublicSubnet ], !Select [ 4, !Ref PublicSubnet ], !Select [ 5, !Ref PublicSubnet ] ] ]
+                    ]
+                  ]
+                ]
+              ]
+            ]
+      TemplateURL: https://s3.amazonaws.com/aws-refarch/wordpress/latest/templates/aws-refarch-wordpress-03-bastion.yaml
   cloudfront:
     Condition: DeployCloudFront
     DependsOn: [ publicalb, web ]
@@ -1008,10 +927,10 @@ Resources:
           !GetAtt [ publicalb, Outputs.PublicAlbDnsName ]
         WPDomainName:
           !Ref WPDomainName
-      TemplateURL: http://k247work-github.s3.amazonaws.com/aws-wp-arch/templates/aws-refarch-wordpress-04-cloudfront.yaml
+      TemplateURL: https://s3.amazonaws.com/aws-refarch/wordpress/latest/templates/aws-refarch-wordpress-04-cloudfront.yaml
   dashboardwithalarms:
     Condition: EfsCreateAlarms
-    DependsOn: [ newvpc, securitygroups, publicalb, efsfilesystem, rds, efsalarms ]
+    DependsOn: [ securitygroups, publicalb, efsfilesystem, rds, efsalarms ]
     Type: AWS::CloudFormation::Stack
     Properties:
       Parameters:
@@ -1031,10 +950,10 @@ Resources:
           !GetAtt [ publicalb, Outputs.PublicAlbFullName ]
         EfsCreateAlarms:
           !Ref EfsCreateAlarms         
-      TemplateURL: http://k247work-github.s3.amazonaws.com/aws-wp-arch/templates/aws-refarch-wordpress-06-dashboard.yaml
+      TemplateURL: https://s3.amazonaws.com/aws-refarch/wordpress/latest/templates/aws-refarch-wordpress-06-dashboard.yaml
   dashboardwithnoalarms:
     Condition: EfsCreateNoAlarms
-    DependsOn: [ newvpc, securitygroups, publicalb, efsfilesystem, rds ]
+    DependsOn: [ securitygroups, publicalb, efsfilesystem, rds ]
     Type: AWS::CloudFormation::Stack
     Properties:
       Parameters:
@@ -1046,9 +965,9 @@ Resources:
           !GetAtt [ publicalb, Outputs.PublicAlbFullName ]
         EfsCreateAlarms:
           !Ref EfsCreateAlarms         
-      TemplateURL: http://k247work-github.s3.amazonaws.com/aws-wp-arch/templates/aws-refarch-wordpress-06-dashboard.yaml
+      TemplateURL: https://s3.amazonaws.com/aws-refarch/wordpress/latest/templates/aws-refarch-wordpress-06-dashboard.yaml
   efsfilesystem:
-    DependsOn: [ newvpc, securitygroups ]
+    DependsOn: [ securitygroups ]
     Type: AWS::CloudFormation::Stack
     Properties:
       Parameters:
@@ -1062,15 +981,37 @@ Resources:
           !GetAtt [ securitygroups, Outputs.EfsSecurityGroup ]
         Growth:
           !Ref EfsGrowth
+        EfsCopyDataFrom:
+          !Ref EfsCopyDataFrom
         InstanceType:
           !Ref EfsGrowthInstanceType
         NumberOfSubnets:
-          !Ref NumberOfAZs  
+          !Ref NumberOfDataSubnets  
         PerformanceMode:
           !Ref EfsPerformanceMode
         Subnet:
-          !GetAtt [ newvpc, Outputs.DataSubnet ]
-      TemplateURL: http://k247work-github.s3.amazonaws.com/aws-wp-arch/templates/aws-refarch-wordpress-03-efsfilesystem.yaml
+          !If
+            [ NumberOfDataSubnets1,
+            !Select [ 0, !Ref DataSubnet ],
+            !If
+              [ NumberOfDataSubnets2,
+              !Join [ ',', [ !Select [ 0, !Ref DataSubnet ], !Select [ 1, !Ref DataSubnet ] ] ],
+              !If
+                [ NumberOfDataSubnets3,
+                !Join [ ',', [ !Select [ 0, !Ref DataSubnet ], !Select [ 1, !Ref DataSubnet ], !Select [ 2, !Ref DataSubnet ] ] ],
+                !If
+                  [ NumberOfDataSubnets4,
+                  !Join [ ',', [ !Select [ 0, !Ref DataSubnet ], !Select [ 1, !Ref DataSubnet ], !Select [ 2, !Ref DataSubnet ], !Select [ 3, !Ref DataSubnet ] ] ],
+                  !If
+                    [ NumberOfDataSubnets5,
+                    !Join [ ',', [ !Select [ 0, !Ref DataSubnet ], !Select [ 1, !Ref DataSubnet ], !Select [ 2, !Ref DataSubnet ], !Select [ 3, !Ref DataSubnet ], !Select [ 4, !Ref DataSubnet ] ] ],
+                    !Join [ ',', [ !Select [ 0, !Ref DataSubnet ], !Select [ 1, !Ref DataSubnet ], !Select [ 2, !Ref DataSubnet ], !Select [ 3, !Ref DataSubnet ], !Select [ 4, !Ref DataSubnet ], !Select [ 5, !Ref DataSubnet ] ] ]
+                    ]
+                  ]
+                ]
+              ]
+            ]
+      TemplateURL: https://s3.amazonaws.com/aws-refarch/wordpress/latest/templates/aws-refarch-wordpress-03-efsfilesystem.yaml
   efsalarms:
     Condition: EfsCreateAlarms
     DependsOn: [ efsfilesystem ]
@@ -1090,98 +1031,107 @@ Resources:
         InstanceType:
           !Ref EfsAlarmsInstanceType
         NumberOfSubnets:
-          !Ref NumberOfAZs  
+          !Ref NumberOfDataSubnets  
         Subnet:
-          !GetAtt [ newvpc, Outputs.DataSubnet ]
+          !If
+            [ NumberOfDataSubnets1,
+            !Select [ 0, !Ref DataSubnet ],
+            !If
+              [ NumberOfDataSubnets2,
+              !Join [ ',', [ !Select [ 0, !Ref DataSubnet ], !Select [ 1, !Ref DataSubnet ] ] ],
+              !If
+                [ NumberOfDataSubnets3,
+                !Join [ ',', [ !Select [ 0, !Ref DataSubnet ], !Select [ 1, !Ref DataSubnet ], !Select [ 2, !Ref DataSubnet ] ] ],
+                !If
+                  [ NumberOfDataSubnets4,
+                  !Join [ ',', [ !Select [ 0, !Ref DataSubnet ], !Select [ 1, !Ref DataSubnet ], !Select [ 2, !Ref DataSubnet ], !Select [ 3, !Ref DataSubnet ] ] ],
+                  !If
+                    [ NumberOfDataSubnets5,
+                    !Join [ ',', [ !Select [ 0, !Ref DataSubnet ], !Select [ 1, !Ref DataSubnet ], !Select [ 2, !Ref DataSubnet ], !Select [ 3, !Ref DataSubnet ], !Select [ 4, !Ref DataSubnet ] ] ],
+                    !Join [ ',', [ !Select [ 0, !Ref DataSubnet ], !Select [ 1, !Ref DataSubnet ], !Select [ 2, !Ref DataSubnet ], !Select [ 3, !Ref DataSubnet ], !Select [ 4, !Ref DataSubnet ], !Select [ 5, !Ref DataSubnet ] ] ]
+                    ]
+                  ]
+                ]
+              ]
+            ]
         WarningThreshold:
           !Ref EfsWarningThreshold
-      TemplateURL: http://k247work-github.s3.amazonaws.com/aws-wp-arch/templates/aws-refarch-wordpress-03-efsalarms.yaml
+      TemplateURL: https://s3.amazonaws.com/aws-refarch/wordpress/latest/templates/aws-refarch-wordpress-03-efsalarms.yaml
   elasticache:
     Condition: DeployElastiCache
-    DependsOn: [ newvpc, securitygroups ]
+    DependsOn: [ securitygroups ]
     Type: AWS::CloudFormation::Stack
     Properties:
       Parameters:
         Subnet:
-          !GetAtt [ newvpc, Outputs.DataSubnet ]
+          !If
+            [ NumberOfDataSubnets1,
+            !Select [ 0, !Ref DataSubnet ],
+            !If
+              [ NumberOfDataSubnets2,
+              !Join [ ',', [ !Select [ 0, !Ref DataSubnet ], !Select [ 1, !Ref DataSubnet ] ] ],
+              !If
+                [ NumberOfDataSubnets3,
+                !Join [ ',', [ !Select [ 0, !Ref DataSubnet ], !Select [ 1, !Ref DataSubnet ], !Select [ 2, !Ref DataSubnet ] ] ],
+                !If
+                  [ NumberOfDataSubnets4,
+                  !Join [ ',', [ !Select [ 0, !Ref DataSubnet ], !Select [ 1, !Ref DataSubnet ], !Select [ 2, !Ref DataSubnet ], !Select [ 3, !Ref DataSubnet ] ] ],
+                  !If
+                    [ NumberOfDataSubnets5,
+                    !Join [ ',', [ !Select [ 0, !Ref DataSubnet ], !Select [ 1, !Ref DataSubnet ], !Select [ 2, !Ref DataSubnet ], !Select [ 3, !Ref DataSubnet ], !Select [ 4, !Ref DataSubnet ] ] ],
+                    !Join [ ',', [ !Select [ 0, !Ref DataSubnet ], !Select [ 1, !Ref DataSubnet ], !Select [ 2, !Ref DataSubnet ], !Select [ 3, !Ref DataSubnet ], !Select [ 4, !Ref DataSubnet ], !Select [ 5, !Ref DataSubnet ] ] ]
+                    ]
+                  ]
+                ]
+              ]
+            ]
         ElastiCacheNodeType:
           !Ref ElastiCacheNodeType
         ElastiCacheSecurityGroup:
           !GetAtt [ securitygroups, Outputs.ElastiCacheSecurityGroup ]
         NumberOfSubnets:
-          !Ref NumberOfAZs
-      TemplateURL: http://k247work-github.s3.amazonaws.com/aws-wp-arch/templates/aws-refarch-wordpress-03-elasticache.yaml
-  newvpc:
-    Type: AWS::CloudFormation::Stack
-    Properties:
-      Parameters:
-        NumberOfAZs:
-          !Ref NumberOfAZs
-        AvailabilityZones:
-          !Join
-            - ','
-            - !Ref AvailabilityZones
-        VpcCidr:
-          !Ref VpcCidr
-        VpcTenancy:
-          !Ref VpcTenancy
-        PublicSubnet0Cidr:
-          !Ref PublicSubnet0Cidr
-        PublicSubnet1Cidr:
-          !Ref PublicSubnet1Cidr
-        PublicSubnet2Cidr:
-          !Ref PublicSubnet2Cidr
-        PublicSubnet3Cidr:
-          !Ref PublicSubnet3Cidr
-        PublicSubnet4Cidr:
-          !Ref PublicSubnet4Cidr
-        PublicSubnet5Cidr:
-          !Ref PublicSubnet5Cidr
-        WebSubnet0Cidr:
-          !Ref WebSubnet0Cidr
-        WebSubnet1Cidr:
-          !Ref WebSubnet1Cidr
-        WebSubnet2Cidr:
-          !Ref WebSubnet2Cidr
-        WebSubnet3Cidr:
-          !Ref WebSubnet3Cidr
-        WebSubnet4Cidr:
-          !Ref WebSubnet4Cidr
-        WebSubnet5Cidr:
-          !Ref WebSubnet5Cidr
-        DataSubnet0Cidr:
-          !Ref DataSubnet0Cidr
-        DataSubnet1Cidr:
-          !Ref DataSubnet1Cidr
-        DataSubnet2Cidr:
-          !Ref DataSubnet2Cidr
-        DataSubnet3Cidr:
-          !Ref DataSubnet3Cidr
-        DataSubnet4Cidr:
-          !Ref DataSubnet4Cidr
-        DataSubnet5Cidr:
-          !Ref DataSubnet5Cidr
-      TemplateURL: http://k247work-github.s3.amazonaws.com/aws-wp-arch/templates/aws-refarch-wordpress-01-newvpc.yaml
+          !Ref NumberOfDataSubnets
+      TemplateURL: https://s3.amazonaws.com/aws-refarch/wordpress/latest/templates/aws-refarch-wordpress-03-elasticache.yaml
   publicalb:
     Condition: AvailableAWSRegion
-    DependsOn: [ newvpc, securitygroups ]
+    DependsOn: [ securitygroups ]
     Type: AWS::CloudFormation::Stack
     Properties:
       Parameters:
         NumberOfSubnets:
-          !Ref NumberOfAZs
+          !Ref NumberOfPublicSubnets
         Subnet:
-          !GetAtt [ newvpc, Outputs.PublicSubnet ]
+          !If
+            [ NumberOfPublicSubnets1,
+            !Select [ 0, !Ref PublicSubnet ],
+            !If
+              [ NumberOfPublicSubnets2,
+              !Join [ ',', [ !Select [ 0, !Ref PublicSubnet ], !Select [ 1, !Ref PublicSubnet ] ] ],
+              !If
+                [ NumberOfPublicSubnets3,
+                !Join [ ',', [ !Select [ 0, !Ref PublicSubnet ], !Select [ 1, !Ref PublicSubnet ], !Select [ 2, !Ref PublicSubnet ] ] ],
+                !If
+                  [ NumberOfPublicSubnets4,
+                  !Join [ ',', [ !Select [ 0, !Ref PublicSubnet ], !Select [ 1, !Ref PublicSubnet ], !Select [ 2, !Ref PublicSubnet ], !Select [ 3, !Ref PublicSubnet ] ] ],
+                  !If
+                    [ NumberOfPublicSubnets5,
+                    !Join [ ',', [ !Select [ 0, !Ref PublicSubnet ], !Select [ 1, !Ref PublicSubnet ], !Select [ 2, !Ref PublicSubnet ], !Select [ 3, !Ref PublicSubnet ], !Select [ 4, !Ref PublicSubnet ] ] ],
+                    !Join [ ',', [ !Select [ 0, !Ref PublicSubnet ], !Select [ 1, !Ref PublicSubnet ], !Select [ 2, !Ref PublicSubnet ], !Select [ 3, !Ref PublicSubnet ], !Select [ 4, !Ref PublicSubnet ], !Select [ 5, !Ref PublicSubnet ] ] ]
+                    ]
+                  ]
+                ]
+              ]
+            ]
         PublicAlbAcmCertificate:
           !Ref PublicAlbAcmCertificate
         PublicAlbSecurityGroup:
           !GetAtt [ securitygroups, Outputs.PublicAlbSecurityGroup ]
         Vpc:
-          !GetAtt [ newvpc, Outputs.Vpc ]
-      TemplateURL: http://k247work-github.s3.amazonaws.com/aws-wp-arch/templates/aws-refarch-wordpress-03-publicalb.yaml
+          !Ref VpcId
+      TemplateURL: https://s3.amazonaws.com/aws-refarch/wordpress/latest/templates/aws-refarch-wordpress-03-publicalb.yaml
   rds:
     Condition: AvailableAWSRegion
-    DependsOn: [ newvpc, securitygroups ]
+    DependsOn: [ securitygroups ]
     Type: AWS::CloudFormation::Stack
     Properties:
       Parameters:
@@ -1191,6 +1141,8 @@ Resources:
           !Ref DatabaseMasterUsername
         DatabaseMasterPassword:
           !Ref DatabaseMasterPassword
+        DatabaseRestoreSnapshot:
+          !Ref DatabaseRestoreSnapshot
         DatabaseName:
           !Ref DatabaseName
         DatabaseEncrpytedBoolean:
@@ -1200,10 +1152,30 @@ Resources:
         DatabaseSecurityGroup:
           !GetAtt [ securitygroups, Outputs.DatabaseSecurityGroup ]
         Subnet:
-          !GetAtt [ newvpc, Outputs.DataSubnet ]
+          !If
+            [ NumberOfDataSubnets1,
+            !Select [ 0, !Ref DataSubnet ],
+            !If
+              [ NumberOfDataSubnets2,
+              !Join [ ',', [ !Select [ 0, !Ref DataSubnet ], !Select [ 1, !Ref DataSubnet ] ] ],
+              !If
+                [ NumberOfDataSubnets3,
+                !Join [ ',', [ !Select [ 0, !Ref DataSubnet ], !Select [ 1, !Ref DataSubnet ], !Select [ 2, !Ref DataSubnet ] ] ],
+                !If
+                  [ NumberOfDataSubnets4,
+                  !Join [ ',', [ !Select [ 0, !Ref DataSubnet ], !Select [ 1, !Ref DataSubnet ], !Select [ 2, !Ref DataSubnet ], !Select [ 3, !Ref DataSubnet ] ] ],
+                  !If
+                    [ NumberOfDataSubnets5,
+                    !Join [ ',', [ !Select [ 0, !Ref DataSubnet ], !Select [ 1, !Ref DataSubnet ], !Select [ 2, !Ref DataSubnet ], !Select [ 3, !Ref DataSubnet ], !Select [ 4, !Ref DataSubnet ] ] ],
+                    !Join [ ',', [ !Select [ 0, !Ref DataSubnet ], !Select [ 1, !Ref DataSubnet ], !Select [ 2, !Ref DataSubnet ], !Select [ 3, !Ref DataSubnet ], !Select [ 4, !Ref DataSubnet ], !Select [ 5, !Ref DataSubnet ] ] ]
+                    ]
+                  ]
+                ]
+              ]
+            ]
         NumberOfSubnets:
-          !Ref NumberOfAZs
-      TemplateURL: http://k247work-github.s3.amazonaws.com/aws-wp-arch/templates/aws-refarch-wordpress-03-rds.yaml
+          !Ref NumberOfDataSubnets
+      TemplateURL: https://s3.amazonaws.com/aws-refarch/wordpress/latest/templates/aws-refarch-wordpress-03-rds.yaml
   route53:
     Condition: CreateRecordSet
     DependsOn: [ publicalb, web ]
@@ -1216,21 +1188,20 @@ Resources:
           !If [ DeployCloudFront, 'Z2FDTNDATAQYW2', !GetAtt [ publicalb, Outputs.PublicAlbCanonicalHostedZoneId ] ]
         WPDomainName:
           !Ref WPDomainName
-      TemplateURL: http://k247work-github.s3.amazonaws.com/aws-wp-arch/templates/aws-refarch-wordpress-05-route53.yaml
+      TemplateURL: https://s3.amazonaws.com/aws-refarch/wordpress/latest/templates/aws-refarch-wordpress-05-route53.yaml
   securitygroups:
     Condition: AvailableAWSRegion
-    DependsOn: newvpc
     Type: AWS::CloudFormation::Stack
     Properties:
       Parameters:
         SshAccessCidr:
           !Ref SshAccessCidr
         Vpc:
-          !GetAtt [ newvpc, Outputs.Vpc ]
-      TemplateURL: http://k247work-github.s3.amazonaws.com/aws-wp-arch/templates/aws-refarch-wordpress-02-securitygroups.yaml
+          !Ref VpcId
+      TemplateURL: https://s3.amazonaws.com/aws-refarch/wordpress/latest/templates/aws-refarch-wordpress-02-securitygroups.yaml
   web:
     Condition: AvailableAWSRegion
-    DependsOn: [ efsfilesystem, newvpc, publicalb, securitygroups ]
+    DependsOn: [ efsfilesystem, publicalb, securitygroups ]
     Type: AWS::CloudFormation::Stack
     Properties:
       Parameters:
@@ -1247,7 +1218,7 @@ Resources:
         EC2KeyName:
           !Ref EC2KeyName
         NumberOfSubnets:
-          !Ref NumberOfAZs
+          !Ref NumberOfWebSubnets
         PHPIniOverride:
           !Ref PHPIniOverride
         PHPVersion:
@@ -1267,7 +1238,27 @@ Resources:
         WebSecurityGroup:
           !GetAtt [ securitygroups, Outputs.WebSecurityGroup ]
         Subnet:
-          !GetAtt [ newvpc, Outputs.WebSubnet ]
+          !If
+            [ NumberOfWebSubnets1,
+            !Select [ 0, !Ref WebSubnet ],
+            !If
+              [ NumberOfWebSubnets2,
+              !Join [ ',', [ !Select [ 0, !Ref WebSubnet ], !Select [ 1, !Ref WebSubnet ] ] ],
+              !If
+                [ NumberOfWebSubnets3,
+                !Join [ ',', [ !Select [ 0, !Ref WebSubnet ], !Select [ 1, !Ref WebSubnet ], !Select [ 2, !Ref WebSubnet ] ] ],
+                !If
+                  [ NumberOfWebSubnets4,
+                  !Join [ ',', [ !Select [ 0, !Ref WebSubnet ], !Select [ 1, !Ref WebSubnet ], !Select [ 2, !Ref WebSubnet ], !Select [ 3, !Ref WebSubnet ] ] ],
+                  !If
+                    [ NumberOfWebSubnets5,
+                    !Join [ ',', [ !Select [ 0, !Ref WebSubnet ], !Select [ 1, !Ref WebSubnet ], !Select [ 2, !Ref WebSubnet ], !Select [ 3, !Ref WebSubnet ], !Select [ 4, !Ref WebSubnet ] ] ],
+                    !Join [ ',', [ !Select [ 0, !Ref WebSubnet ], !Select [ 1, !Ref WebSubnet ], !Select [ 2, !Ref WebSubnet ], !Select [ 3, !Ref WebSubnet ], !Select [ 4, !Ref WebSubnet ], !Select [ 5, !Ref WebSubnet ] ] ]
+                    ]
+                  ]
+                ]
+              ]
+            ]
         WPAdminEmail:
           !Ref AdminEmail
         WPAdminPassword:
@@ -1284,13 +1275,13 @@ Resources:
           !Ref WPTitle
         WPVersion:
           !Ref WPVersion
-      TemplateURL: http://k247work-github.s3.amazonaws.com/aws-wp-arch/templates/aws-refarch-wordpress-04-web.yaml
+      TemplateURL: https://s3.amazonaws.com/aws-refarch/wordpress/latest/templates/aws-refarch-wordpress-04-web.yaml
 
 Outputs:
 
   StackStatus:
     Description: Master Stack Status
-    Value: !If [ AvailableAWSRegion, !Join [ '', [ 'Stack created in an available region: ', !Ref 'AWS::Region' ] ], "!!ERROR!!! - Nothing to do! - unavailable AWS Region. You must create this stack in an available AWS Region: 'us-east-1', 'us-east-2', 'us-west-2', 'eu-west-1', 'ap-southeast-2', 'ap-northeast-1'." ]
+    Value: !If [ AvailableAWSRegion, !Join [ '', [ 'Stack created in an available region: ', !Ref 'AWS::Region' ] ], "!!ERROR!!! - Nothing to do! - unavailable AWS Region. You must create this stack in an available AWS Region: 'us-east-1', 'us-east-2', 'us-west-2', 'eu-west-1', 'ap-southeast-2'." ]
   WPSiteUrl:
     Description: The URL of the WordPress site
     Value: !If [ CreateRecordSet, !Join [ '', [ 'http://www.', !Ref WPDomainName ] ], !If [ DeployCloudFront, !GetAtt [ cloudfront, Outputs.DnsHostname ], !GetAtt [ publicalb, Outputs.PublicAlbHostname ] ] ]
