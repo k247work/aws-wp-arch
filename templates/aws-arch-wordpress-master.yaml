@@ -3,7 +3,8 @@ AWSTemplateFormatVersion: 2010-09-09
 
 Description: Stack to deploy a WordPress environment based on https://github.com/aws-samples/aws-refarch-wordpress.
 
-MetaData:
+Metadata:
+
   Authors:
     Description: Darryl Osborne (darrylo@amazon.com)  modified by K247work.
   License:
@@ -1298,4 +1299,4 @@ Outputs:
     Description: A page to validate OpCache has been enabled for each instance in the ASG. Refresh the page to see the status of each instance in the ASG.
     Value: !Join [ '', [ !If [ CreateRecordSet, !Join [ '', [ 'http://www.', !Ref WPDomainName ] ], !If [ DeployCloudFront, !GetAtt [ cloudfront, Outputs.DnsHostname ], !GetAtt [ publicalb, Outputs.PublicAlbHostname ] ] ], '/opcache-instanceid.php' ] ]
 
-    
+  
